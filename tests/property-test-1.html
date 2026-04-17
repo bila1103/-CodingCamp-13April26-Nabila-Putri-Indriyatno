@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Property Test 1 — Balance and Summary Invariant</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; background: #f5f7fa; color: #1e2330; }
+    h1 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .result { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .pass { background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
+    .fail { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+    .info { background: #e0e7ff; border: 1px solid #6366f1; color: #3730a3; }
+    pre { margin-top: 0.5rem; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Property Tests — Expense &amp; Budget Visualizer</h1>
+  <div id="output"></div>
+
+  <!-- fast-check via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/fast-check@3/lib/bundle/fast-check.js"></script>
+
+  <!-- Transactions module under test (inline copy — mirrors index.html) -->
+  <script>
+    const Transactions = {
+      add(txns, tx) {
+        return [...txns, tx];
+      },
+      remove(txns, id) {
+        return txns.filter(tx => tx.id !== id);
+      },
+      filter(txns, cat) {
+        if (cat === 'All') return txns;
+        return txns.filter(tx => tx.category === cat);
+      },
+      summary(txns) {
+        let income = 0, expenses = 0;
+        for (const tx of txns) {
+          if (tx.type === 'income') income   += tx.amount;
+          else                      expenses += tx.amount;
+        }
+        return { balance: income - expenses, income, expenses };
+      },
+      byCategory(txns) {
+        const map = new Map();
+        for (const tx of txns) {
+          if (tx.type !== 'expense') continue;
+          map.set(tx.category, (map.get(tx.category) ?? 0) + tx.amount);
+        }
+        return map;
+      },
+    };
+  </script>
+
+  <script>
+    // Feature: expense-budget-visualizer, Property 1: Balance and summary invariant
+
+    const out = document.getElementById('output');
+
+    function log(msg, cls = 'info') {
+      const div = document.createElement('div');
+      div.className = `result ${cls}`;
+      div.innerHTML = msg;
+      out.appendChild(div);
+    }
+
+    function approxEq(a, b) {
+      return Math.abs(a - b) < 1e-9;
+    }
+
+    // ── Unit tests ──
+
+    // summary([]) → { balance: 0, income: 0, expenses: 0 }
+    (() => {
+      const result = Transactions.summary([]);
+      if (result.balance === 0 && result.income === 0 && result.expenses === 0) {
+        log('✓ Unit test: summary([]) === { balance: 0, income: 0, expenses: 0 }', 'pass');
+      } else {
+        log(`✗ Unit test FAILED: summary([]) returned ${JSON.stringify(result)}`, 'fail');
+      }
+    })();
+
+    // summary([income:100, expense:40]) → { balance: 60, income: 100, expenses: 40 }
+    (() => {
+      const txns = [
+        { id: '1', description: 'Salary',   amount: 100, category: 'Work', type: 'income',  date: '2024-01-01' },
+        { id: '2', description: 'Groceries', amount: 40, category: 'Food', type: 'expense', date: '2024-01-02' },
+      ];
+      const result = Transactions.summary(txns);
+      if (approxEq(result.balance, 60) && approxEq(result.income, 100) && approxEq(result.expenses, 40)) {
+        log('✓ Unit test: summary([income:100, expense:40]) === { balance: 60, income: 100, expenses: 40 }', 'pass');
+      } else {
+        log(`✗ Unit test FAILED: summary returned ${JSON.stringify(result)}`, 'fail');
+      }
+    })();
+
+    // ── Arbitraries ──
+
+    const arbDate = fc.tuple(
+      fc.integer({ min: 2000, max: 2099 }),
+      fc.integer({ min: 1,    max: 12   }),
+      fc.integer({ min: 1,    max: 28   })
+    ).map(([y, m, d]) =>
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
+
+    const arbNonEmptyString = fc.string({ minLength: 1, maxLength: 50 })
+      .filter(s => s.trim().length > 0);
+
+    const arbPositiveAmount = fc.float({ min: 0.01, max: 1_000_000, noNaN: true, noDefaultInfinity: true })
+      .filter(n => n > 0 && isFinite(n));
+
+    const arbTransaction = fc.record({
+      id:          fc.oneof(fc.uuidV(4), fc.string({ minLength: 1, maxLength: 30 }).filter(s => s.length > 0)),
+      description: arbNonEmptyString,
+      amount:      arbPositiveAmount,
+      category:    arbNonEmptyString,
+      type:        fc.oneof(fc.constant('income'), fc.constant('expense')),
+      date:        arbDate,
+    });
+
+    const arbTransactionArray = fc.array(arbTransaction, { minLength: 0, maxLength: 20 });
+
+    // ── Property 1: Balance and summary invariant ──
+    // Validates: Requirements 1.2, 1.3, 1.4
+
+    try {
+      fc.assert(
+        fc.property(arbTransactionArray, (txns) => {
+          // Independently compute incomeSum and expenseSum
+          let incomeSum = 0;
+          let expenseSum = 0;
+          for (const tx of txns) {
+            if (tx.type === 'income') incomeSum  += tx.amount;
+            else                      expenseSum += tx.amount;
+          }
+
+          const result = Transactions.summary(txns);
+
+          return (
+            approxEq(result.balance,  incomeSum - expenseSum) &&
+            approxEq(result.income,   incomeSum)              &&
+            approxEq(result.expenses, expenseSum)
+          );
+        }),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 1 passed (200 runs): summary(txns) balance/income/expenses invariant holds for all transaction arrays.', 'pass');
+    } catch (err) {
+      log(`✗ Property 1 FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+  </script>
+</body>
+</html>

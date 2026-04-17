@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Property Test 2 — Transaction Persistence Round-Trip</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; background: #f5f7fa; color: #1e2330; }
+    h1 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .result { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .pass { background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
+    .fail { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+    .info { background: #e0e7ff; border: 1px solid #6366f1; color: #3730a3; }
+    pre { margin-top: 0.5rem; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Property Tests — Expense &amp; Budget Visualizer</h1>
+  <div id="output"></div>
+
+  <!-- fast-check via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/fast-check@3/lib/bundle/fast-check.js"></script>
+  <script>
+    // Feature: expense-budget-visualizer, Property 2: Transaction persistence round-trip
+
+    const out = document.getElementById('output');
+
+    function log(msg, cls = 'info') {
+      const div = document.createElement('div');
+      div.className = `result ${cls}`;
+      div.innerHTML = msg;
+      out.appendChild(div);
+    }
+
+    // ── Arbitraries ──
+
+    // ISO 8601 date string "YYYY-MM-DD"
+    const arbDate = fc.tuple(
+      fc.integer({ min: 2000, max: 2099 }),
+      fc.integer({ min: 1, max: 12 }),
+      fc.integer({ min: 1, max: 28 })
+    ).map(([y, m, d]) =>
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
+
+    // Non-empty string (trimmed, no control chars)
+    const arbNonEmptyString = fc.string({ minLength: 1, maxLength: 50 })
+      .filter(s => s.trim().length > 0);
+
+    // Positive finite number
+    const arbPositiveAmount = fc.float({ min: 0.01, max: 1_000_000, noNaN: true, noDefaultInfinity: true })
+      .filter(n => n > 0 && isFinite(n));
+
+    // Valid transaction object
+    const arbTransaction = fc.record({
+      id:          fc.oneof(fc.uuidV(4), fc.string({ minLength: 1, maxLength: 30 }).filter(s => s.length > 0)),
+      description: arbNonEmptyString,
+      amount:      arbPositiveAmount,
+      category:    arbNonEmptyString,
+      type:        fc.oneof(fc.constant('income'), fc.constant('expense')),
+      date:        arbDate,
+    });
+
+    // Array of valid transactions (0–20 items)
+    const arbTransactionArray = fc.array(arbTransaction, { minLength: 0, maxLength: 20 });
+
+    // ── Property 2: Transaction persistence round-trip ──
+    // For any valid transaction array, JSON.parse(JSON.stringify(txns)) deep-equals the original.
+
+    function deepEqual(a, b) {
+      if (a === b) return true;
+      if (typeof a !== typeof b) return false;
+      if (Array.isArray(a) && Array.isArray(b)) {
+        if (a.length !== b.length) return false;
+        return a.every((item, i) => deepEqual(item, b[i]));
+      }
+      if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
+        const keysA = Object.keys(a).sort();
+        const keysB = Object.keys(b).sort();
+        if (!deepEqual(keysA, keysB)) return false;
+        return keysA.every(k => deepEqual(a[k], b[k]));
+      }
+      return false;
+    }
+
+    try {
+      fc.assert(
+        fc.property(arbTransactionArray, (txns) => {
+          const roundTripped = JSON.parse(JSON.stringify(txns));
+
+          // Same length
+          if (roundTripped.length !== txns.length) return false;
+
+          // Each transaction must have identical fields
+          return txns.every((tx, i) => {
+            const rt = roundTripped[i];
+            return (
+              rt.id          === tx.id          &&
+              rt.description === tx.description &&
+              rt.amount      === tx.amount      &&
+              rt.category    === tx.category    &&
+              rt.type        === tx.type        &&
+              rt.date        === tx.date
+            );
+          });
+        }),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 2 passed (200 runs): JSON.parse(JSON.stringify(txns)) deep-equals the original array for all valid transaction arrays.', 'pass');
+    } catch (err) {
+      log(`✗ Property 2 FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Property Test 6 — Category Map Totals Correctness</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; background: #f5f7fa; color: #1e2330; }
+    h1 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .result { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .pass { background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
+    .fail { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+    .info { background: #e0e7ff; border: 1px solid #6366f1; color: #3730a3; }
+    pre { margin-top: 0.5rem; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Property Tests — Expense &amp; Budget Visualizer</h1>
+  <div id="output"></div>
+
+  <!-- fast-check via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/fast-check@3/lib/bundle/fast-check.js"></script>
+
+  <!-- Transactions module under test (inline copy — mirrors index.html) -->
+  <script>
+    const Transactions = {
+      add(txns, tx) {
+        return [...txns, tx];
+      },
+      remove(txns, id) {
+        return txns.filter(tx => tx.id !== id);
+      },
+      filter(txns, cat) {
+        if (cat === 'All') return txns;
+        return txns.filter(tx => tx.category === cat);
+      },
+      summary(txns) {
+        let income = 0, expenses = 0;
+        for (const tx of txns) {
+          if (tx.type === 'income') income   += tx.amount;
+          else                      expenses += tx.amount;
+        }
+        return { balance: income - expenses, income, expenses };
+      },
+      byCategory(txns) {
+        const map = new Map();
+        for (const tx of txns) {
+          if (tx.type !== 'expense') continue;
+          map.set(tx.category, (map.get(tx.category) ?? 0) + tx.amount);
+        }
+        return map;
+      },
+    };
+  </script>
+
+  <script>
+    // Feature: expense-budget-visualizer, Property 6: Category map totals correctness
+
+    const out = document.getElementById('output');
+
+    function log(msg, cls = 'info') {
+      const div = document.createElement('div');
+      div.className = `result ${cls}`;
+      div.innerHTML = msg;
+      out.appendChild(div);
+    }
+
+    function approxEq(a, b) {
+      return Math.abs(a - b) < 1e-9;
+    }
+
+    // ── Arbitraries ──
+
+    const arbDate = fc.tuple(
+      fc.integer({ min: 2000, max: 2099 }),
+      fc.integer({ min: 1,    max: 12   }),
+      fc.integer({ min: 1,    max: 28   })
+    ).map(([y, m, d]) =>
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
+
+    const arbNonEmptyString = fc.string({ minLength: 1, maxLength: 50 })
+      .filter(s => s.trim().length > 0);
+
+    const arbPositiveAmount = fc.float({ min: 0.01, max: 1_000_000, noNaN: true, noDefaultInfinity: true })
+      .filter(n => n > 0 && isFinite(n));
+
+    const arbTransaction = fc.record({
+      id:          fc.oneof(fc.uuidV(4), fc.string({ minLength: 1, maxLength: 30 }).filter(s => s.length > 0)),
+      description: arbNonEmptyString,
+      amount:      arbPositiveAmount,
+      category:    arbNonEmptyString,
+      type:        fc.oneof(fc.constant('income'), fc.constant('expense')),
+      date:        arbDate,
+    });
+
+    const arbTransactionArray = fc.array(arbTransaction, { minLength: 0, maxLength: 20 });
+
+    // ── Unit tests ──
+
+    // byCategory([]) → empty Map
+    (() => {
+      const map = Transactions.byCategory([]);
+      if (map.size === 0) {
+        log('✓ Unit test: byCategory([]) returns an empty Map', 'pass');
+      } else {
+        log(`✗ Unit test FAILED: byCategory([]) returned a Map with ${map.size} entries`, 'fail');
+      }
+    })();
+
+    // byCategory with only income transactions → empty Map
+    (() => {
+      const txns = [
+        { id: '1', description: 'Salary', amount: 1000, category: 'Work', type: 'income', date: '2024-01-01' },
+      ];
+      const map = Transactions.byCategory(txns);
+      if (map.size === 0) {
+        log('✓ Unit test: byCategory([income only]) returns an empty Map', 'pass');
+      } else {
+        log(`✗ Unit test FAILED: byCategory([income only]) returned Map with ${map.size} entries`, 'fail');
+      }
+    })();
+
+    // byCategory with known expenses → correct per-category sums
+    (() => {
+      const txns = [
+        { id: '1', description: 'Groceries',  amount: 10, category: 'Food',      type: 'expense', date: '2024-01-01' },
+        { id: '2', description: 'Lunch',       amount: 5,  category: 'Food',      type: 'expense', date: '2024-01-02' },
+        { id: '3', description: 'Bus',         amount: 20, category: 'Transport', type: 'expense', date: '2024-01-03' },
+        { id: '4', description: 'Salary',      amount: 500, category: 'Work',     type: 'income',  date: '2024-01-04' },
+      ];
+      const map = Transactions.byCategory(txns);
+      const { expenses } = Transactions.summary(txns);
+      const mapSum = [...map.values()].reduce((a, b) => a + b, 0);
+
+      if (
+        approxEq(map.get('Food'), 15) &&
+        approxEq(map.get('Transport'), 20) &&
+        !map.has('Work') &&
+        approxEq(mapSum, expenses)
+      ) {
+        log('✓ Unit test: byCategory([Food:10, Food:5, Transport:20, income:500]) → Food=15, Transport=20, sum=35', 'pass');
+      } else {
+        log(`✗ Unit test FAILED: Food=${map.get('Food')}, Transport=${map.get('Transport')}, mapSum=${mapSum}, expenses=${expenses}`, 'fail');
+      }
+    })();
+
+    // ── Property 6a: sum of byCategory values === summary.expenses ──
+    // Validates: Requirements 5.1, 5.3
+
+    try {
+      fc.assert(
+        fc.property(arbTransactionArray, (txns) => {
+          const map = Transactions.byCategory(txns);
+          const { expenses } = Transactions.summary(txns);
+
+          const mapSum = [...map.values()].reduce((a, b) => a + b, 0);
+
+          return approxEq(mapSum, expenses);
+        }),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 6a passed (200 runs): sum(byCategory(txns).values()) === summary(txns).expenses for all transaction arrays.', 'pass');
+    } catch (err) {
+      log(`✗ Property 6a FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+
+    // ── Property 6b: each category key maps to the correct sum of expense amounts ──
+    // Validates: Requirements 5.1, 5.3
+
+    try {
+      fc.assert(
+        fc.property(arbTransactionArray, (txns) => {
+          const map = Transactions.byCategory(txns);
+
+          // For each category in the map, verify the value equals the manual sum
+          for (const [cat, total] of map) {
+            const expected = txns
+              .filter(tx => tx.type === 'expense' && tx.category === cat)
+              .reduce((sum, tx) => sum + tx.amount, 0);
+
+            if (!approxEq(total, expected)) return false;
+          }
+
+          // Also verify no expense category is missing from the map
+          const expenseCategories = new Set(
+            txns.filter(tx => tx.type === 'expense').map(tx => tx.category)
+          );
+          for (const cat of expenseCategories) {
+            if (!map.has(cat)) return false;
+          }
+
+          // Verify the map contains no income categories
+          const incomeOnlyCategories = new Set(
+            txns.filter(tx => tx.type === 'income').map(tx => tx.category)
+          );
+          for (const cat of incomeOnlyCategories) {
+            // A category may appear in both income and expense transactions;
+            // only flag it if it has NO expense transactions
+            const hasExpense = txns.some(tx => tx.type === 'expense' && tx.category === cat);
+            if (!hasExpense && map.has(cat)) return false;
+          }
+
+          return true;
+        }),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 6b passed (200 runs): each category key in byCategory(txns) maps to the correct sum of expense amounts for that category.', 'pass');
+    } catch (err) {
+      log(`✗ Property 6b FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Property Test 5 — Category Filter Subset Invariant</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; background: #f5f7fa; color: #1e2330; }
+    h1 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .result { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .pass { background: #dcfce7; border: 1px solid #22c55e; color: #166534; }
+    .fail { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+    .info { background: #e0e7ff; border: 1px solid #6366f1; color: #3730a3; }
+    pre { margin-top: 0.5rem; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Property Tests — Expense &amp; Budget Visualizer</h1>
+  <div id="output"></div>
+
+  <!-- fast-check via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/fast-check@3/lib/bundle/fast-check.js"></script>
+
+  <!-- Transactions module under test (inline copy — mirrors index.html) -->
+  <script>
+    const Transactions = {
+      add(txns, tx) {
+        return [...txns, tx];
+      },
+      remove(txns, id) {
+        return txns.filter(tx => tx.id !== id);
+      },
+      filter(txns, cat) {
+        if (cat === 'All') return txns;
+        return txns.filter(tx => tx.category === cat);
+      },
+      summary(txns) {
+        let income = 0, expenses = 0;
+        for (const tx of txns) {
+          if (tx.type === 'income') income   += tx.amount;
+          else                      expenses += tx.amount;
+        }
+        return { balance: income - expenses, income, expenses };
+      },
+      byCategory(txns) {
+        const map = new Map();
+        for (const tx of txns) {
+          if (tx.type !== 'expense') continue;
+          map.set(tx.category, (map.get(tx.category) ?? 0) + tx.amount);
+        }
+        return map;
+      },
+    };
+  </script>
+
+  <script>
+    // Feature: expense-budget-visualizer, Property 5: Category filter subset invariant
+
+    const out = document.getElementById('output');
+
+    function log(msg, cls = 'info') {
+      const div = document.createElement('div');
+      div.className = `result ${cls}`;
+      div.innerHTML = msg;
+      out.appendChild(div);
+    }
+
+    // ── Arbitraries ──
+
+    const arbDate = fc.tuple(
+      fc.integer({ min: 2000, max: 2099 }),
+      fc.integer({ min: 1,    max: 12   }),
+      fc.integer({ min: 1,    max: 28   })
+    ).map(([y, m, d]) =>
+      `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    );
+
+    const arbNonEmptyString = fc.string({ minLength: 1, maxLength: 50 })
+      .filter(s => s.trim().length > 0);
+
+    const arbPositiveAmount = fc.float({ min: 0.01, max: 1_000_000, noNaN: true, noDefaultInfinity: true })
+      .filter(n => n > 0 && isFinite(n));
+
+    const arbTransaction = fc.record({
+      id:          fc.oneof(fc.uuidV(4), fc.string({ minLength: 1, maxLength: 30 }).filter(s => s.length > 0)),
+      description: arbNonEmptyString,
+      amount:      arbPositiveAmount,
+      category:    arbNonEmptyString,
+      type:        fc.oneof(fc.constant('income'), fc.constant('expense')),
+      date:        arbDate,
+    });
+
+    // Category string: either "All" or an arbitrary non-empty string
+    const arbCategory = fc.oneof(
+      fc.constant('All'),
+      arbNonEmptyString
+    );
+
+    // ── Property 5a: filter(list, cat) returns ONLY transactions whose category equals cat ──
+    // Validates: Requirements 6.2
+
+    try {
+      fc.assert(
+        fc.property(
+          fc.array(arbTransaction, { minLength: 0, maxLength: 20 }),
+          arbNonEmptyString,
+          (list, cat) => {
+            const result = Transactions.filter(list, cat);
+
+            // Every item in the result must have category === cat
+            return result.every(tx => tx.category === cat);
+          }
+        ),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 5a passed (200 runs): Transactions.filter(list, cat) returns only transactions whose category equals cat.', 'pass');
+    } catch (err) {
+      log(`✗ Property 5a FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+
+    // ── Property 5b: filter(list, "All") returns the complete list unchanged ──
+    // Validates: Requirements 6.3
+
+    try {
+      fc.assert(
+        fc.property(
+          fc.array(arbTransaction, { minLength: 0, maxLength: 20 }),
+          (list) => {
+            const result = Transactions.filter(list, 'All');
+
+            // Must be the same reference or identical contents
+            if (result.length !== list.length) return false;
+
+            return list.every((tx, i) => {
+              const r = result[i];
+              return (
+                r.id          === tx.id          &&
+                r.description === tx.description &&
+                r.amount      === tx.amount      &&
+                r.category    === tx.category    &&
+                r.type        === tx.type        &&
+                r.date        === tx.date
+              );
+            });
+          }
+        ),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 5b passed (200 runs): Transactions.filter(list, "All") returns the complete list unchanged.', 'pass');
+    } catch (err) {
+      log(`✗ Property 5b FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+
+    // ── Property 5c: filter result is a subset — no items are added that weren't in the original list ──
+    // Validates: Requirements 6.2
+
+    try {
+      fc.assert(
+        fc.property(
+          fc.array(arbTransaction, { minLength: 0, maxLength: 20 }),
+          arbCategory,
+          (list, cat) => {
+            const result = Transactions.filter(list, cat);
+
+            // Result must be a subset: every result item must exist in the original list
+            return result.every(r => list.some(tx => tx.id === r.id));
+          }
+        ),
+        { numRuns: 200, verbose: true }
+      );
+
+      log('✓ Property 5c passed (200 runs): Transactions.filter(list, cat) result is always a subset of the original list.', 'pass');
+    } catch (err) {
+      log(`✗ Property 5c FAILED<pre>${err.message || err}</pre>`, 'fail');
+    }
+  </script>
+</body>
+</html>
