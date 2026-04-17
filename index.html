@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expense &amp; Budget Visualizer</title>
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --color-bg: #f5f7fa;
+      --color-surface: #ffffff;
+      --color-border: #dde1e7;
+      --color-primary: #4f6ef7;
+      --color-primary-dark: #3a57d4;
+      --color-income: #22c55e;
+      --color-expense: #ef4444;
+      --color-text: #1e2330;
+      --color-muted: #6b7280;
+      --color-warning-bg: #fef3c7;
+      --color-warning-border: #f59e0b;
+      --radius: 8px;
+      --shadow: 0 1px 4px rgba(0,0,0,.08);
+      --min-touch: 44px;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      min-height: 100vh;
+      padding: 0 0 2rem;
+    }
+
+    /* ── Warning banner (hidden by default) ── */
+    #warning-banner {
+      display: none;
+      background: var(--color-warning-bg);
+      border-bottom: 2px solid var(--color-warning-border);
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      text-align: center;
+    }
+    #warning-banner.visible { display: block; }
+
+    /* ── App wrapper ── */
+    #app {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 1rem;
+    }
+
+    /* ── Summary bar ── */
+    #summary-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      padding: 1rem 0;
+    }
+
+    .summary-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1rem;
+      text-align: center;
+    }
+
+    .summary-card .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: var(--color-muted);
+      margin-bottom: 0.25rem;
+    }
+
+    .summary-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    #balance-value { color: var(--color-primary); }
+    #income-value  { color: var(--color-income); }
+    #expense-value { color: var(--color-expense); }
+
+    /* ── Add-transaction form ── */
+    #add-transaction-section {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    #add-transaction-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    #add-transaction-form {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .form-group label {
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .form-group input,
+    .form-group select {
+      height: var(--min-touch);
+      min-height: var(--min-touch);
+      padding: 0 0.75rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 1rem;
+      background: var(--color-bg);
+      color: var(--color-text);
+      width: 100%;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 1px;
+    }
+
+    .field-error {
+      font-size: 0.8rem;
+      color: var(--color-expense);
+      min-height: 1.1em;
+    }
+
+    #submit-btn {
+      height: var(--min-touch);
+      min-height: var(--min-touch);
+      min-width: var(--min-touch);
+      padding: 0 1.5rem;
+      background: var(--color-primary);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      align-self: end;
+    }
+
+    #submit-btn:hover { background: var(--color-primary-dark); }
+    #submit-btn:focus { outline: 2px solid var(--color-primary-dark); outline-offset: 2px; }
+
+    /* ── Main content area (chart + list) ── */
+    #main-content {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+
+    /* ── Chart area ── */
+    #chart-section {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.25rem;
+    }
+
+    #chart-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+
+    #chart-container {
+      position: relative;
+      width: 100%;
+      max-width: 320px;
+      margin: 0 auto;
+    }
+
+    #chart {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    #chart-placeholder {
+      text-align: center;
+      color: var(--color-muted);
+      font-size: 0.9rem;
+      padding: 2rem 0;
+    }
+
+    /* ── Transaction list section ── */
+    #list-section {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    #list-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Category filter ── */
+    #filter-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    #filter-group label {
+      font-size: 0.875rem;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    #category-filter {
+      height: var(--min-touch);
+      min-height: var(--min-touch);
+      padding: 0 0.75rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      background: var(--color-bg);
+      color: var(--color-text);
+      flex: 1;
+    }
+
+    #category-filter:focus {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 1px;
+    }
+
+    /* ── Transaction list ── */
+    #transaction-list {
+      overflow-y: auto;
+      max-height: 400px;
+      flex: 1;
+    }
+
+    #transaction-list:empty::after,
+    #transaction-list .empty-state {
+      display: block;
+      text-align: center;
+      color: var(--color-muted);
+      font-size: 0.9rem;
+      padding: 2rem 0;
+    }
+
+    .transaction-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--color-border);
+      gap: 0.5rem;
+    }
+
+    .transaction-item:last-child { border-bottom: none; }
+
+    .tx-info { flex: 1; min-width: 0; }
+    .tx-description { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tx-meta { font-size: 0.75rem; color: var(--color-muted); }
+
+    .tx-amount {
+      font-weight: 700;
+      font-size: 0.95rem;
+      white-space: nowrap;
+    }
+    .tx-amount.income  { color: var(--color-income); }
+    .tx-amount.expense { color: var(--color-expense); }
+
+    .tx-delete {
+      height: var(--min-touch);
+      min-height: var(--min-touch);
+      min-width: var(--min-touch);
+      padding: 0 0.5rem;
+      background: transparent;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      color: var(--color-expense);
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tx-delete:hover { background: #fee2e2; }
+    .tx-delete:focus { outline: 2px solid var(--color-expense); outline-offset: 2px; }
+
+    /* ── Responsive: ≥768px two-column layout ── */
+    @media (min-width: 768px) {
+      #add-transaction-form {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      #submit-btn {
+        grid-column: span 2;
+        justify-self: start;
+      }
+
+      #main-content {
+        grid-template-columns: 1fr 1fr;
+        align-items: start;
+      }
+
+      #transaction-list {
+        max-height: 500px;
+      }
+    }
+
+    /* ── Responsive: ≥1024px wider form ── */
+    @media (min-width: 1024px) {
+      #add-transaction-form {
+        grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto;
+      }
+
+      #submit-btn {
+        grid-column: auto;
+        justify-self: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- localStorage warning banner (hidden until needed) -->
+  <div id="warning-banner" role="alert" aria-live="polite">
+    ⚠️ Local storage is unavailable. Your data will not be saved between sessions.
+  </div>
+
+  <div id="app">
+
+    <!-- Summary bar: Balance, Income, Expenses -->
+    <section id="summary-bar" aria-label="Financial summary">
+      <div class="summary-card">
+        <div class="label">Balance</div>
+        <div class="value" id="balance-value">$0.00</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Income</div>
+        <div class="value" id="income-value">$0.00</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Expenses</div>
+        <div class="value" id="expense-value">$0.00</div>
+      </div>
+    </section>
+
+    <!-- Add transaction form -->
+    <section id="add-transaction-section" aria-label="Add transaction">
+      <h2>Add Transaction</h2>
+      <form id="add-transaction-form" novalidate>
+
+        <div class="form-group">
+          <label for="tx-description">Description</label>
+          <input type="text" id="tx-description" name="description"
+                 placeholder="e.g. Groceries" autocomplete="off" />
+          <span class="field-error" id="error-description" aria-live="polite"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="tx-amount">Amount</label>
+          <input type="number" id="tx-amount" name="amount"
+                 placeholder="0.00" min="0.01" step="0.01" />
+          <span class="field-error" id="error-amount" aria-live="polite"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="tx-category">Category</label>
+          <input type="text" id="tx-category" name="category"
+                 placeholder="e.g. Food" list="category-suggestions" autocomplete="off" />
+          <datalist id="category-suggestions">
+            <option value="Food" />
+            <option value="Transport" />
+            <option value="Entertainment" />
+            <option value="Housing" />
+            <option value="Health" />
+            <option value="Other" />
+          </datalist>
+          <span class="field-error" id="error-category" aria-live="polite"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="tx-type">Type</label>
+          <select id="tx-type" name="type">
+            <option value="">Select type</option>
+            <option value="expense">Expense</option>
+            <option value="income">Income</option>
+          </select>
+          <span class="field-error" id="error-type" aria-live="polite"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="tx-date">Date</label>
+          <input type="date" id="tx-date" name="date" />
+          <span class="field-error" id="error-date" aria-live="polite"></span>
+        </div>
+
+        <button type="submit" id="submit-btn">Add</button>
+
+      </form>
+    </section>
+
+    <!-- Chart + Transaction list (side-by-side at ≥768px) -->
+    <div id="main-content">
+
+      <!-- Chart area -->
+      <section id="chart-section" aria-label="Spending by category">
+        <h2>Spending by Category</h2>
+        <div id="chart-container">
+          <canvas id="chart" width="300" height="300" aria-label="Pie chart of spending by category">
+            Your browser does not support the HTML canvas element. Please upgrade to a modern browser to view the spending chart.
+          </canvas>
+          <div id="chart-placeholder" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- Transaction list with category filter -->
+      <section id="list-section" aria-label="Transaction history">
+        <h2>Transactions</h2>
+
+        <div id="filter-group">
+          <label for="category-filter">Filter:</label>
+          <select id="category-filter" aria-label="Filter transactions by category">
+            <option value="All">All</option>
+          </select>
+        </div>
+
+        <ul id="transaction-list" aria-label="Transaction list" aria-live="polite">
+          <!-- Transaction items injected by View.renderList() -->
+        </ul>
+
+      </section>
+
+    </div><!-- /#main-content -->
+
+  </div><!-- /#app -->
+
+
+  <script>
+    // ── Store module ──
+    const Store = {
+      KEY: 'ebv_transactions',
+      parseError: false,
+
+      load() {
+        try {
+          const raw = localStorage.getItem(this.KEY);
+          if (!raw) return [];
+          return JSON.parse(raw);
+        } catch {
+          this.parseError = true;
+          return [];
+        }
+      },
+
+      save(txns) {
+        localStorage.setItem(this.KEY, JSON.stringify(txns));
+      },
+
+      isAvailable() {
+        try {
+          const probe = '__ebv_probe__';
+          localStorage.setItem(probe, '1');
+          localStorage.getItem(probe);
+          localStorage.removeItem(probe);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    };
+  </script>
+
+  <script>
+    // ── Transactions module (pure functions — no DOM, no side-effects) ──
+    const Transactions = {
+
+      // 3.1 — Returns a new array with tx appended
+      add(txns, tx) {
+        return [...txns, tx];
+      },
+
+      // 3.3 — Returns a new array with the transaction matching id excluded
+      remove(txns, id) {
+        return txns.filter(tx => tx.id !== id);
+      },
+
+      // 3.5 — Returns transactions matching cat; full list when cat === "All"
+      filter(txns, cat) {
+        if (cat === 'All') return txns;
+        return txns.filter(tx => tx.category === cat);
+      },
+
+      // 3.7 — Returns { balance, income, expenses }
+      summary(txns) {
+        let income = 0;
+        let expenses = 0;
+        for (const tx of txns) {
+          if (tx.type === 'income')  income   += tx.amount;
+          else                       expenses += tx.amount;
+        }
+        return { balance: income - expenses, income, expenses };
+      },
+
+      // 3.9 — Returns Map<category, totalExpenseAmount>
+      byCategory(txns) {
+        const map = new Map();
+        for (const tx of txns) {
+          if (tx.type !== 'expense') continue;
+          map.set(tx.category, (map.get(tx.category) ?? 0) + tx.amount);
+        }
+        return map;
+      },
+    };
+  </script>
+
+  <script>
+    // ── Form validation (standalone) ──
+
+    /**
+     * validate(formData) — validates a transaction form submission.
+     *
+     * @param {{ description, amount, category, type, date }} formData
+     * @returns {null} on success
+     * @returns {{ field: string, message: string }} on the first validation failure
+     *
+     * Requirements: 2.3, 2.4
+     */
+    function validate(formData) {
+      const stringFields = ['description', 'category', 'type', 'date'];
+
+      for (const field of stringFields) {
+        const val = formData[field];
+        if (typeof val !== 'string' || val.trim() === '') {
+          return { field, message: `${field.charAt(0).toUpperCase() + field.slice(1)} is required.` };
+        }
+      }
+
+      const amount = formData.amount;
+      const num = typeof amount === 'number' ? amount : Number(amount);
+      if (typeof amount === 'string' && amount.trim() === '') {
+        return { field: 'amount', message: 'Amount is required.' };
+      }
+      if (!isFinite(num) || isNaN(num) || num <= 0) {
+        return { field: 'amount', message: 'Amount must be a positive number.' };
+      }
+
+      return null;
+    }
+  </script>
+
+  <script>
+    // ── Chart module ──
+    const Chart = {
+      // Palette of distinct colors for donut segments
+      PALETTE: [
+        '#4f6ef7', '#22c55e', '#ef4444', '#f59e0b', '#8b5cf6',
+        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#14b8a6'
+      ],
+
+      /**
+       * draw(canvas, categoryMap) — renders a donut chart on the given canvas.
+       * Requirements: 5.1, 5.2, 5.3, 5.4, 5.5
+       *
+       * @param {HTMLCanvasElement} canvas
+       * @param {Map<string, number>} categoryMap
+       */
+      draw(canvas, categoryMap) {
+        const placeholder = document.getElementById('chart-placeholder');
+
+        // Check Canvas 2D support
+        const ctx = canvas.getContext ? canvas.getContext('2d') : null;
+        if (!ctx) {
+          const section = document.getElementById('chart-section');
+          if (section) section.style.display = 'none';
+          if (placeholder) placeholder.textContent = 'Chart not supported in this browser.';
+          return;
+        }
+
+        // No expense data
+        if (!categoryMap || categoryMap.size === 0) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          canvas.style.display = 'none';
+          if (placeholder) placeholder.textContent = 'No expense data yet.';
+          return;
+        }
+
+        // Has data — show canvas, clear placeholder
+        canvas.style.display = 'block';
+        if (placeholder) placeholder.textContent = '';
+
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const cx = W / 2;
+        const cy = H / 2;
+        const outerR = Math.min(W, H) * 0.40;
+        const innerR = Math.min(W, H) * 0.20;
+
+        // Compute total
+        let total = 0;
+        for (const v of categoryMap.values()) total += v;
+
+        // Draw segments and collect label info
+        const entries = [...categoryMap.entries()];
+        let startAngle = -Math.PI / 2; // start at top
+
+        const labelData = [];
+
+        entries.forEach(([cat, val], i) => {
+          const sweep = (val / total) * 2 * Math.PI;
+          const endAngle = startAngle + sweep;
+          const color = this.PALETTE[i % this.PALETTE.length];
+
+          // Draw segment
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, outerR, startAngle, endAngle);
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.fill();
+
+          // Punch out inner circle (donut hole) per segment
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, innerR, startAngle, endAngle);
+          ctx.closePath();
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+
+          // Midpoint angle for label line
+          const midAngle = startAngle + sweep / 2;
+          const pct = Math.round((val / total) * 100);
+          labelData.push({ cat, pct, midAngle, color });
+
+          startAngle = endAngle;
+        });
+
+        // Draw labels outside the donut with a line from segment midpoint
+        ctx.font = `${Math.max(10, Math.round(W * 0.038))}px system-ui, sans-serif`;
+        ctx.textBaseline = 'middle';
+
+        for (const { cat, pct, midAngle, color } of labelData) {
+          const lineStart = outerR + 4;
+          const lineEnd   = outerR + 16;
+          const textStart = outerR + 20;
+
+          const cosA = Math.cos(midAngle);
+          const sinA = Math.sin(midAngle);
+
+          const x1 = cx + cosA * lineStart;
+          const y1 = cy + sinA * lineStart;
+          const x2 = cx + cosA * lineEnd;
+          const y2 = cy + sinA * lineEnd;
+          const xt = cx + cosA * textStart;
+          const yt = cy + sinA * textStart;
+
+          // Line
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+
+          // Label text
+          const label = `${cat} ${pct}%`;
+          ctx.fillStyle = '#1e2330';
+          ctx.textAlign = cosA >= 0 ? 'left' : 'right';
+          ctx.fillText(label, xt, yt);
+        }
+      }
+    };
+  </script>
+
+  <script>
+    // ── View module ──
+    const View = {
+
+      // 6.1 — Update summary bar values
+      renderSummary(summary) {
+        document.getElementById('balance-value').textContent = '$' + summary.balance.toFixed(2);
+        document.getElementById('income-value').textContent  = '$' + summary.income.toFixed(2);
+        document.getElementById('expense-value').textContent = '$' + summary.expenses.toFixed(2);
+      },
+
+      // 6.2 — Rebuild transaction list (most-recent date first)
+      renderList(txns) {
+        const ul = document.getElementById('transaction-list');
+        ul.innerHTML = '';
+
+        if (!txns || txns.length === 0) {
+          const li = document.createElement('li');
+          li.className = 'empty-state';
+          li.textContent = 'No transactions recorded yet.';
+          ul.appendChild(li);
+          return;
+        }
+
+        const sorted = [...txns].sort((a, b) => b.date.localeCompare(a.date));
+
+        for (const tx of sorted) {
+          const li = document.createElement('li');
+          li.className = 'transaction-item';
+
+          const info = document.createElement('div');
+          info.className = 'tx-info';
+
+          const desc = document.createElement('div');
+          desc.className = 'tx-description';
+          desc.textContent = tx.description;
+
+          const meta = document.createElement('div');
+          meta.className = 'tx-meta';
+          meta.textContent = tx.category + ' · ' + tx.type + ' · ' + tx.date;
+
+          info.appendChild(desc);
+          info.appendChild(meta);
+
+          const amount = document.createElement('span');
+          amount.className = 'tx-amount ' + tx.type;
+          amount.textContent = (tx.type === 'income' ? '+' : '-') + '$' + tx.amount.toFixed(2);
+
+          const btn = document.createElement('button');
+          btn.className = 'tx-delete';
+          btn.dataset.id = tx.id;
+          btn.setAttribute('aria-label', 'Delete ' + tx.description);
+          btn.textContent = '✕';
+
+          li.appendChild(info);
+          li.appendChild(amount);
+          li.appendChild(btn);
+          ul.appendChild(li);
+        }
+      },
+
+      // 6.3 — Rebuild category filter select, preserving selection
+      renderFilter(categories, selected) {
+        const sel = document.getElementById('category-filter');
+        sel.innerHTML = '';
+
+        const allOpt = document.createElement('option');
+        allOpt.value = 'All';
+        allOpt.textContent = 'All';
+        sel.appendChild(allOpt);
+
+        for (const cat of categories) {
+          const opt = document.createElement('option');
+          opt.value = cat;
+          opt.textContent = cat;
+          sel.appendChild(opt);
+        }
+
+        sel.value = selected;
+      },
+
+      // 6.4 — Show a validation error for a specific field
+      showFormError(field, message) {
+        const errorEl = document.getElementById('error-' + field);
+        if (errorEl) errorEl.textContent = message;
+
+        const inputEl = document.getElementById('tx-' + field) ||
+                        document.querySelector('[name="' + field + '"]');
+        if (inputEl) inputEl.setAttribute('aria-invalid', 'true');
+      },
+
+      // 6.4 — Reset form and clear all errors
+      clearForm() {
+        const form = document.getElementById('add-transaction-form');
+        if (form) form.reset();
+
+        const errorSpans = document.querySelectorAll('[id^="error-"]');
+        errorSpans.forEach(el => { el.textContent = ''; });
+
+        const invalidEls = document.querySelectorAll('[aria-invalid="true"]');
+        invalidEls.forEach(el => { el.removeAttribute('aria-invalid'); });
+      },
+
+      // 5.1, 5.2 — Render the donut chart for expense categories
+      renderChart(categoryMap) {
+        Chart.draw(document.getElementById('chart'), categoryMap);
+      },
+    };
+  </script>
+
+  <script>
+    // ── Controller module ──
+    const Controller = (() => {
+      let txns = [];
+
+      function rerender() {
+        const currentFilter = document.getElementById('category-filter').value || 'All';
+        View.renderSummary(Transactions.summary(txns));
+        View.renderList(Transactions.filter(txns, currentFilter));
+        const categories = [...new Set(txns.map(tx => tx.category))];
+        View.renderFilter(categories, currentFilter);
+        View.renderChart(Transactions.byCategory(txns));
+      }
+
+      return {
+        init() {
+          // Task 8.1 — Load persisted data and initial render
+          txns = Store.load();
+
+          if (!Store.isAvailable() || Store.parseError) {
+            document.getElementById('warning-banner').classList.add('visible');
+          }
+
+          const categories = [...new Set(txns.map(tx => tx.category))];
+          View.renderSummary(Transactions.summary(txns));
+          View.renderList(txns);
+          View.renderFilter(categories, 'All');
+          View.renderChart(Transactions.byCategory(txns));
+
+          // Task 8.2 — Add transaction form submit
+          document.getElementById('add-transaction-form').addEventListener('submit', e => {
+            e.preventDefault();
+
+            // Clear previous errors
+            ['description', 'amount', 'category', 'type', 'date'].forEach(field => {
+              View.showFormError(field, '');
+            });
+
+            const description = document.getElementById('tx-description').value;
+            const amount      = document.getElementById('tx-amount').value;
+            const category    = document.getElementById('tx-category').value;
+            const type        = document.getElementById('tx-type').value;
+            const date        = document.getElementById('tx-date').value;
+
+            const err = validate({ description, amount, category, type, date });
+            if (err) {
+              View.showFormError(err.field, err.message);
+              return;
+            }
+
+            const tx = {
+              id: (typeof crypto !== 'undefined' && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : (Date.now().toString() + Math.random().toString(36).slice(2)),
+              description: description.trim(),
+              amount: parseFloat(amount),
+              category: category.trim(),
+              type,
+              date
+            };
+
+            txns = Transactions.add(txns, tx);
+            Store.save(txns);
+            rerender();
+            View.clearForm();
+            document.getElementById('tx-description').focus();
+          });
+
+          // Task 8.3 — Delete transaction via event delegation
+          document.getElementById('transaction-list').addEventListener('click', e => {
+            const btn = e.target.closest('.tx-delete');
+            if (!btn) return;
+            const id = btn.dataset.id;
+            txns = Transactions.remove(txns, id);
+            Store.save(txns);
+            rerender();
+          });
+
+          // Task 8.4 — Category filter change
+          document.getElementById('category-filter').addEventListener('change', e => {
+            const selectedCat = e.target.value;
+            View.renderList(Transactions.filter(txns, selectedCat));
+          });
+        }
+      };
+    })();
+
+    document.addEventListener('DOMContentLoaded', () => Controller.init());
+  </script>
+</body>
+</html>
